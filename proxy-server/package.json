@@ -1,15 +1,15 @@
 {
-  "name": "xtremenode-proxy",
+  "name": "xtremenode-stream-server",
   "version": "1.0.0",
-  "description": "XtremeNode port-8000 proxy server — serves /webrtc without headers",
+  "description": "XtremeNode independent WebRTC stream server on port 8000 with API key auth",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "add-key": "node server.js --add-key",
+    "list-keys": "node server.js --list-keys",
+    "remove-key": "node server.js --remove-key"
   },
-  "dependencies": {
-    "http-proxy": "^1.18.1"
-  },
-  "engines": {
-    "node": ">=16"
-  }
+  "dependencies": {},
+  "engines": { "node": ">=16" },
+  "license": "MIT"
 }

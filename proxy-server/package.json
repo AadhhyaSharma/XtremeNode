@@ -1,0 +1,15 @@
+{
+  "name": "xtremenode-proxy",
+  "version": "1.0.0",
+  "description": "XtremeNode port-8000 proxy server — serves /webrtc without headers",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "http-proxy": "^1.18.1"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}

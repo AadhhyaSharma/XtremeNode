@@ -1,0 +1,151 @@
+# XtremeNode — Windows Installer Build & Release
+# Builds the XtremeNode .exe installer using the existing CI-Windows workflow
+# and publishes it as a GitHub Release artifact.
+#
+# Triggers:
+#   - Manual: workflow_dispatch (choose version tag)
+#   - Push to a version tag: v*.*.*
+#   - Push to master/main (draft build)
+
+name: Build Windows Installer
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag (e.g. v1.0.0). Leave blank for a dev build."
+        required: false
+        type: string
+      publish_release:
+        description: "Publish as a GitHub Release?"
+        required: false
+        default: true
+        type: boolean
+
+  push:
+    tags:
+      - 'v*.*.*'
+    branches:
+      - master
+      - main
+
+jobs:
+  # ── Determine release metadata ────────────────────────────────────────────
+  meta:
+    name: Resolve release metadata
+    runs-on: ubuntu-latest
+    outputs:
+      release_version: ${{ steps.meta.outputs.release_version }}
+      release_commit:  ${{ steps.meta.outputs.release_commit }}
+      should_publish:  ${{ steps.meta.outputs.should_publish }}
+      tag_name:        ${{ steps.meta.outputs.tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve metadata
+        id: meta
+        env:
+          INPUT_TAG:     ${{ github.event.inputs.release_tag || '' }}
+          SHOULD_PUB:    ${{ github.event.inputs.publish_release || 'false' }}
+          GITHUB_REF:    ${{ github.ref }}
+          GITHUB_SHA:    ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          TAG="$INPUT_TAG"
+          if [ -z "$TAG" ] && [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+
+          VERSION="${TAG#v}"
+          if [ -z "$VERSION" ]; then
+            VERSION="0.0.0-dev.$(git rev-parse --short HEAD)"
+          fi
+
+          PUBLISH="false"
+          if [ "$SHOULD_PUB" = "true" ] || [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            PUBLISH="true"
+          fi
+
+          echo "release_version=$VERSION"   >> "$GITHUB_OUTPUT"
+          echo "release_commit=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          echo "should_publish=$PUBLISH"    >> "$GITHUB_OUTPUT"
+          echo "tag_name=${TAG:-}"          >> "$GITHUB_OUTPUT"
+
+  # ── Windows build ─────────────────────────────────────────────────────────
+  windows:
+    name: Windows x64 Installer
+    needs: meta
+    uses: ./.github/workflows/ci-windows.yml
+    permissions:
+      contents: read
+    with:
+      release_commit:      ${{ needs.meta.outputs.release_commit }}
+      release_version:     ${{ needs.meta.outputs.release_version }}
+      release_tag:         ${{ needs.meta.outputs.tag_name }}
+      symbol_product_name: XtremeNode
+      symbol_release_prefix: xtremenode
+
+  # ── Publish GitHub Release ────────────────────────────────────────────────
+  release:
+    name: Publish GitHub Release
+    needs: [meta, windows]
+    if: needs.meta.outputs.should_publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "build-Windows"
+          path: dist/
+          merge-multiple: true
+
+      - name: List dist
+        run: find dist/ -type f | sort
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name:   ${{ needs.meta.outputs.tag_name || format('v{0}', needs.meta.outputs.release_version) }}
+          name:       "XtremeNode ${{ needs.meta.outputs.release_version }}"
+          draft:      ${{ needs.meta.outputs.should_publish != 'true' }}
+          prerelease: ${{ contains(needs.meta.outputs.release_version, 'alpha') || contains(needs.meta.outputs.release_version, 'beta') || contains(needs.meta.outputs.release_version, 'rc') }}
+          body: |
+            ## XtremeNode ${{ needs.meta.outputs.release_version }}
+
+            ### What's new
+            - Rebranded to **XtremeNode** (fork of Vibepollo/Sunshine)
+            - `/webrtc` page now exposed **without headers** on port 8000 via the bundled proxy server
+            - **GStreamer ultra-low latency toggle** in WebRTC settings
+            - **Public Access page** — one-click tunneling via Cloudflare, ngrok, Tailscale, or router port forwarding
+
+            ### Installation
+            1. Download `XtremeNode-windows-installer.exe` below
+            2. Run the installer (administrator required)
+            3. XtremeNode starts automatically as a Windows service on boot
+
+            ### Proxy server (port 8000)
+            After installing, start the proxy:
+            ```powershell
+            cd "C:\Program Files\XtremeNode\proxy-server"
+            npm install
+            npm start
+            ```
+            Then open `http://localhost:8000/webrtc` — no headers, stream-only.
+
+            ### GStreamer (optional, ultra-low latency)
+            Install [GStreamer](https://gstreamer.freedesktop.org/download/) on the host machine,
+            then toggle **GStreamer Ultra-Low Latency** in the WebRTC settings panel.
+          files: |
+            dist/**/*.exe
+            dist/**/*.msi
+            dist/**/*.zip

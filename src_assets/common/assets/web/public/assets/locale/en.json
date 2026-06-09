@@ -731,7 +731,7 @@
   },
   "webrtc": {
     "nav": "Stream",
-    "title": "WebRTC Streaming",
+    "title": "XtremeNode Streaming",
     "subtitle": "Experimental browser streaming with higher latency and lower quality than native streaming.",
     "experimental_notice": "Experimental: expect higher latency and lower quality than native streaming.",
     "session_settings": "Session Settings",

@@ -1,42 +1,38 @@
 <template>
   <div class="webrtc-app" :class="{ 'settings-open': showSettings }">
-    <!-- Main Content Area -->
+    <!-- Main Content Area — NO top header, just library + stream panel -->
     <div class="main-content">
-      <!-- Compact Header -->
-      <header class="app-header">
-        <div class="header-left">
-          <div class="brand">
-            <div class="brand-icon">
-              <i class="fas fa-play"></i>
-            </div>
-            <h1>{{ $t('webrtc.title') }}</h1>
-          </div>
-        </div>
-
-        <div class="header-center">
-          <div class="status-pill" :class="connectionPillClass">
-            <span class="status-dot"></span>
-            <span>{{ connectionStatusLabel }}</span>
-          </div>
-        </div>
-
-        <div class="header-right">
-          <button
-            class="settings-btn"
-            @click="showSettings = !showSettings"
-            :class="{ active: showSettings }"
-          >
-            <i class="fas fa-sliders-h"></i>
-            <span>Settings</span>
-          </button>
-        </div>
-      </header>
 
       <!-- Game Library -->
       <section class="library-section">
         <div class="library-header">
           <div class="library-title-row">
-            <h2><i class="fas fa-gamepad"></i> {{ $t('webrtc.select_game') }}</h2>
+            <!-- XtremeNode Streaming title inline (no big header) -->
+            <h2 class="xn-title">
+              <i class="fas fa-play"></i>
+              {{ $t('webrtc.title') }}
+            </h2>
+
+            <!-- Status pill moved here -->
+            <div class="status-pill" :class="connectionPillClass">
+              <span class="status-dot"></span>
+              <span>{{ connectionStatusLabel }}</span>
+            </div>
+
+            <!-- Settings button moved here -->
+            <button
+              class="settings-btn"
+              @click="showSettings = !showSettings"
+              :class="{ active: showSettings }"
+            >
+              <i class="fas fa-sliders-h"></i>
+              <span>Settings</span>
+            </button>
+          </div>
+
+          <!-- Select a Game subheader -->
+          <div class="library-sub-row">
+            <h3><i class="fas fa-gamepad"></i> {{ $t('webrtc.select_game') }}</h3>
             <span v-if="selectedAppId" class="selection-badge">
               <i class="fas fa-check-circle"></i>
               {{ selectedAppLabel }}
@@ -45,6 +41,7 @@
               </button>
             </span>
           </div>
+
           <div class="search-box">
             <i class="fas fa-search"></i>
             <input
@@ -520,7 +517,6 @@
     </Transition>
   </div>
 </template>
-
 <script setup lang="ts">
 import { ref, reactive, onBeforeUnmount, onMounted, watch, computed, nextTick } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -3122,6 +3118,7 @@ watch(
 
 /* Header */
 .app-header {
+  display: none !important;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -4368,4 +4365,37 @@ watch(
 .dark .library-section::-webkit-scrollbar-thumb {
   background: rgb(255 255 255 / 0.1);
 }
+
+/* XtremeNode — inline title row (replaces full header) */
+.xn-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  margin: 0;
+}
+.xn-title .fas.fa-play {
+  color: var(--accent, #f59e0b);
+  font-size: 0.85rem;
+}
+.library-sub-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+.library-sub-row h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
 </style>

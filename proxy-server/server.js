@@ -2,15 +2,10 @@
  * XtremeNode — Independent WebRTC Stream Server (port 8000)
  *
  * Features:
- *  - API key auth — generate keys, pass as ?key=... in URL or X-Stream-Key header
- *  - Self-contained streaming UI at http://host:8000/?key=YOUR_KEY
+ *  - No authentication — page is open to anyone who can reach port 8000
+ *  - Self-contained streaming UI at http://host:8000/
  *  - Proxies /api/webrtc/* and /api/apps to Sunshine backend (port 47990)
  *  - No dependency on the main Sunshine Vue UI
- *
- * Key management:
- *   node server.js --add-key "alice"      -> generate & save a named key
- *   node server.js --list-keys            -> list all keys
- *   node server.js --remove-key "alice"   -> revoke a key
  */
 
 'use strict';
@@ -18,69 +13,11 @@
 const http   = require('http');
 const https  = require('https');
 const url    = require('url');
-const fs     = require('fs');
-const path   = require('path');
-const crypto = require('crypto');
 
 const PROXY_PORT     = parseInt(process.env.XTREMENODE_PROXY_PORT || '8000', 10);
 const UPSTREAM_HOST  = process.env.XTREMENODE_HOST  || '127.0.0.1';
 const UPSTREAM_PORT  = parseInt(process.env.XTREMENODE_PORT || '47990', 10);
 const UPSTREAM_HTTPS = process.env.XTREMENODE_HTTPS === '1';
-const KEYS_FILE      = path.join(__dirname, 'keys.json');
-
-// ── Key store ────────────────────────────────────────────────────────────────
-
-function loadKeys() {
-  try { return JSON.parse(fs.readFileSync(KEYS_FILE, 'utf8')); }
-  catch { return {}; }
-}
-function saveKeys(keys) {
-  fs.writeFileSync(KEYS_FILE, JSON.stringify(keys, null, 2));
-}
-function generateKey() {
-  return crypto.randomBytes(24).toString('base64url');
-}
-
-// ── CLI ──────────────────────────────────────────────────────────────────────
-
-const args = process.argv.slice(2);
-if (args[0] === '--add-key') {
-  const label = args[1] || 'default';
-  const keys  = loadKeys();
-  const key   = generateKey();
-  keys[label] = { key, created: new Date().toISOString() };
-  saveKeys(keys);
-  console.log('\n  Key added: ' + label);
-  console.log('  Key  : ' + key);
-  console.log('  URL  : http://YOUR_HOST:' + PROXY_PORT + '/?key=' + key + '\n');
-  process.exit(0);
-}
-if (args[0] === '--list-keys') {
-  const entries = Object.entries(loadKeys());
-  if (!entries.length) { console.log('No keys. Use --add-key.'); process.exit(0); }
-  entries.forEach(([l, v]) => console.log(l.padEnd(20) + v.key + '  (' + v.created + ')'));
-  process.exit(0);
-}
-if (args[0] === '--remove-key') {
-  const label = args[1]; if (!label) { console.error('Usage: --remove-key <label>'); process.exit(1); }
-  const keys = loadKeys();
-  if (!keys[label]) { console.error('Key not found: ' + label); process.exit(1); }
-  delete keys[label]; saveKeys(keys);
-  console.log('Removed: ' + label);
-  process.exit(0);
-}
-
-// ── Auth ─────────────────────────────────────────────────────────────────────
-
-function isAuthorized(req) {
-  const keys  = loadKeys();
-  const valid = new Set(Object.values(keys).map(function(v){ return v.key; }));
-  if (!valid.size) return true; // open if no keys configured
-  const parsed   = url.parse(req.url, true);
-  const qKey     = parsed.query.key;
-  const hKey     = req.headers['x-stream-key'];
-  return valid.has(qKey) || valid.has(hKey);
-}
 
 // ── Proxy to Sunshine ────────────────────────────────────────────────────────
 
@@ -98,7 +35,7 @@ function proxyToSunshine(req, res) {
     res.writeHead(pres.statusCode, Object.assign({}, pres.headers, {
       'Access-Control-Allow-Origin':  '*',
       'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type,X-Requested-With,X-Stream-Key',
+      'Access-Control-Allow-Headers': 'Content-Type,X-Requested-With',
     }));
     pres.pipe(res, { end: true });
   });
@@ -111,20 +48,9 @@ function proxyToSunshine(req, res) {
   req.pipe(pr, { end: true });
 }
 
-// ── Key gate page ────────────────────────────────────────────────────────────
-
-function serveKeyGate(res) {
-  res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8' });
-  res.end('<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><title>XtremeNode Auth</title>' +
-'<style>*{box-sizing:border-box;margin:0;padding:0}body{background:#07070f;color:#e0e0e0;font-family:system-ui,sans-serif;height:100vh;display:flex;align-items:center;justify-content:center}.card{background:#111126;border:1px solid #1e1e38;border-radius:14px;padding:36px 40px;width:340px;display:flex;flex-direction:column;gap:16px;text-align:center}.logo{font-size:1.5rem;font-weight:800;color:#4f8ef7}.logo span{color:#a78bfa}p{font-size:.85rem;color:#6a7a9a}input{padding:10px 14px;border-radius:8px;border:1px solid #222240;background:#0d0d20;color:#ddd;font-size:.95rem;outline:none;width:100%}input:focus{border-color:#4f8ef7}button{padding:11px;border-radius:8px;background:#4f8ef7;color:#fff;border:none;font-weight:700;cursor:pointer;font-size:.95rem}button:hover{background:#3a7be0}</style>' +
-'</head><body><div class="card"><div class="logo">Xtreme<span>Node</span></div><p>Enter your stream key</p><input id="k" type="password" placeholder="Stream key" autofocus/><button onclick="go()">Access Stream</button></div>' +
-'<script>document.getElementById("k").addEventListener("keydown",function(e){if(e.key==="Enter")go();});function go(){var k=document.getElementById("k").value.trim();if(k)window.location.href="/?key="+encodeURIComponent(k);}<\/script></body></html>');
-}
-
 // ── Stream UI ────────────────────────────────────────────────────────────────
 
-function serveUI(res, streamKey) {
-  const keyJson = JSON.stringify(streamKey || '');
+function serveUI(res) {
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
   res.end('<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>XtremeNode Stream</title><style>' +
 '*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html,body{width:100%;height:100%;background:#07070f;color:#e0e0e0;font-family:system-ui,sans-serif;overflow:hidden}' +
@@ -151,12 +77,11 @@ function serveUI(res, streamKey) {
 '<div id="hud"><span id="h-res">&ndash;</span><span id="h-fps">&ndash; fps</span><span id="h-codec">&ndash;</span><span id="h-bw">&ndash;</span></div>' +
 '<button id="stop-btn" onclick="disconnect()">&#9209; Disconnect</button>' +
 '<script>' +
-'var STREAM_KEY=' + keyJson + ';' +
-'function apiFetch(p,m,b){return fetch(p,{method:m||"GET",headers:{"Content-Type":"application/json","X-Requested-With":"XMLHttpRequest",...(STREAM_KEY?{"X-Stream-Key":STREAM_KEY}:{})},body:b!=null?JSON.stringify(b):undefined}).then(function(r){return r.json().catch(function(){return{};})});}' +
+'function apiFetch(p,m,b){return fetch(p,{method:m||"GET",headers:{"Content-Type":"application/json","X-Requested-With":"XMLHttpRequest"},body:b!=null?JSON.stringify(b):undefined}).then(function(r){return r.json().catch(function(){return{};})});}' +
 'var sessionId=null,pc=null,cancelIce=null,statsTimer=null,prevBytes=0;' +
 'function setStatus(msg,cls){var el=document.getElementById("status");el.textContent=msg;el.className=cls||"";}' +
 'function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}' +
-'async function loadApps(){try{var r=await fetch("/api/apps",{headers:{"X-Requested-With":"XMLHttpRequest",...(STREAM_KEY?{"X-Stream-Key":STREAM_KEY}:{})}});if(!r.ok)throw new Error("HTTP "+r.status);var data=await r.json();var apps=Array.isArray(data)?data:(data.apps||[]);var sel=document.getElementById("app-sel");sel.innerHTML="<option value=\"\">-- Select application --</option>";apps.forEach(function(a){var o=document.createElement("option");o.value=a.uuid||a.id||"";o.textContent=a.title||a.name||o.value;sel.appendChild(o);});setStatus("Ready - "+apps.length+" app(s)","ok");document.getElementById("start-btn").disabled=false;}catch(e){setStatus("Cannot reach XtremeNode: "+e.message,"err");setTimeout(loadApps,3500);}}' +
+'async function loadApps(){try{var r=await fetch("/api/apps",{headers:{"X-Requested-With":"XMLHttpRequest"}});if(!r.ok)throw new Error("HTTP "+r.status);var data=await r.json();var apps=Array.isArray(data)?data:(data.apps||[]);var sel=document.getElementById("app-sel");sel.innerHTML="<option value=\"\">-- Select application --</option>";apps.forEach(function(a){var o=document.createElement("option");o.value=a.uuid||a.id||"";o.textContent=a.title||a.name||o.value;sel.appendChild(o);});setStatus("Ready - "+apps.length+" app(s)","ok");document.getElementById("start-btn").disabled=false;}catch(e){setStatus("Cannot reach XtremeNode: "+e.message,"err");setTimeout(loadApps,3500);}}' +
 'document.getElementById("start-btn").addEventListener("click",startStream);' +
 'async function startStream(){document.getElementById("start-btn").disabled=true;setStatus("Creating session...");var wh=document.getElementById("res-sel").value.split("x");var w=Number(wh[0]),h=Number(wh[1]);var fps=Number(document.getElementById("fps-sel").value);var codec=document.getElementById("codec-sel").value;var appId=document.getElementById("app-sel").value||undefined;var sess=await apiFetch("/api/webrtc/sessions","POST",{audio:true,video:true,encoded:true,width:w,height:h,fps:fps,bitrate_kbps:10000,codec:codec,app_id:appId});if(!sess||!sess.session||!sess.session.id){setStatus("Session failed: "+JSON.stringify(sess),"err");document.getElementById("start-btn").disabled=false;return;}sessionId=sess.session.id;var iceServers=sess.ice_servers&&sess.ice_servers.length?sess.ice_servers:[{urls:"stun:stun.l.google.com:19302"}];pc=new RTCPeerConnection({iceServers:iceServers,bundlePolicy:"max-bundle",rtcpMuxPolicy:"require"});pc.ontrack=function(e){document.getElementById("surface").classList.add("on");document.getElementById("setup").classList.add("gone");flashHud();var el=e.track.kind==="video"?document.getElementById("vid"):document.getElementById("aud");el.srcObject=e.streams[0]||new MediaStream([e.track]);};pc.onicecandidate=async function(e){if(!e.candidate)return;await apiFetch("/api/webrtc/sessions/"+sessionId+"/ice","POST",{candidates:[{candidate:e.candidate.candidate,sdpMid:e.candidate.sdpMid,sdpMLineIndex:e.candidate.sdpMLineIndex}]});};pc.onconnectionstatechange=function(){if(pc.connectionState==="connected"){setStatus("Streaming","ok");startStats();}if(["failed","disconnected","closed"].includes(pc.connectionState))disconnect();};cancelIce=subscribeIce(sessionId,function(c){pc.addIceCandidate(new RTCIceCandidate(c)).catch(function(){});});setStatus("Negotiating...");var offer=await pc.createOffer();await pc.setLocalDescription(offer);var ans=await apiFetch("/api/webrtc/sessions/"+sessionId+"/offer","POST",{type:offer.type,sdp:offer.sdp});if(!ans||!ans.sdp)ans=await pollAnswer(sessionId);if(!ans||!ans.sdp){setStatus("No SDP answer","err");return;}await pc.setRemoteDescription(new RTCSessionDescription({type:ans.type||"answer",sdp:ans.sdp}));}' +
 'async function pollAnswer(sid){var t=Date.now();while(Date.now()-t<30000){await sleep(800);var r=await apiFetch("/api/webrtc/sessions/"+sid+"/answer");if(r&&r.sdp)return r;}return null;}' +
@@ -175,20 +100,24 @@ var server = http.createServer(function(req, res) {
   var reqPath = parsed.pathname;
 
   if (req.method === 'OPTIONS') {
-    res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type,X-Requested-With,X-Stream-Key' });
+    res.writeHead(204, {
+      'Access-Control-Allow-Origin':  '*',
+      'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type,X-Requested-With',
+    });
     res.end();
     return;
   }
 
+  // Proxy API calls straight through — no auth check
   if (reqPath.startsWith('/api/')) {
-    if (!isAuthorized(req)) { res.writeHead(401, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     proxyToSunshine(req, res);
     return;
   }
 
+  // Serve the stream UI for any root-ish path
   if (reqPath === '/' || reqPath === '/webrtc' || reqPath === '/stream') {
-    if (!isAuthorized(req)) { serveKeyGate(res); return; }
-    serveUI(res, parsed.query.key || req.headers['x-stream-key'] || '');
+    serveUI(res);
     return;
   }
 
@@ -197,12 +126,10 @@ var server = http.createServer(function(req, res) {
 });
 
 server.listen(PROXY_PORT, '0.0.0.0', function() {
-  var keys  = loadKeys();
-  var count = Object.keys(keys).length;
   console.log('\n[XtremeNode] Stream server ready');
   console.log('  URL     : http://0.0.0.0:' + PROXY_PORT + '/');
   console.log('  Upstream: ' + (UPSTREAM_HTTPS ? 'https' : 'http') + '://' + UPSTREAM_HOST + ':' + UPSTREAM_PORT);
-  console.log('  Auth    : ' + (count === 0 ? 'OPEN (no keys — run: node server.js --add-key "name")' : count + ' key(s) active'));
+  console.log('  Auth    : NONE (open access)');
   console.log('');
 });
 

@@ -1,520 +1,322 @@
 <template>
-  <div class="webrtc-app" :class="{ 'settings-open': showSettings }">
-    <!-- Main Content Area — NO top header, just library + stream panel -->
-    <div class="main-content">
+  <div class="xn-root" :class="{ 'stream-active': isConnected || isConnecting }">
 
-      <!-- Game Library -->
-      <section class="library-section">
-        <div class="library-header">
-          <div class="library-title-row">
-            <!-- XtremeNode Streaming title inline (no big header) -->
-            <h2 class="xn-title">
-              <i class="fas fa-play"></i>
-              {{ $t('webrtc.title') }}
-            </h2>
+    <!-- ══════════════════════════════════════════════
+         TOP NAV BAR
+    ══════════════════════════════════════════════ -->
+    <header class="xn-nav">
+      <div class="xn-nav-left">
+        <div class="xn-logo">
+          <i class="fas fa-play-circle xn-logo-icon"></i>
+          <span class="xn-logo-brand">Xtreme<span class="xn-logo-accent">Node</span></span>
+          <span class="xn-logo-divider">|</span>
+          <span class="xn-logo-sub">CLOUD GAMING</span>
+        </div>
+      </div>
+      <div class="xn-nav-right">
+        <button class="xn-nav-btn" @click="showSettings = !showSettings" :class="{ active: showSettings }" title="Settings">
+          <i class="fas fa-sliders-h"></i>
+        </button>
+        <div class="xn-status-badge" :class="connectionPillClass">
+          <span class="xn-status-dot"></span>
+          <span>{{ connectionStatusLabel }}</span>
+        </div>
+      </div>
+    </header>
 
-            <!-- Status pill moved here -->
-            <div class="status-pill" :class="connectionPillClass">
-              <span class="status-dot"></span>
-              <span>{{ connectionStatusLabel }}</span>
-            </div>
-
-            <!-- Settings button moved here -->
-            <button
-              class="settings-btn"
-              @click="showSettings = !showSettings"
-              :class="{ active: showSettings }"
-            >
-              <i class="fas fa-sliders-h"></i>
-              <span>Settings</span>
-            </button>
-          </div>
-
-          <!-- Select a Game subheader -->
-          <div class="library-sub-row">
-            <h3><i class="fas fa-gamepad"></i> {{ $t('webrtc.select_game') }}</h3>
-            <span v-if="selectedAppId" class="selection-badge">
-              <i class="fas fa-check-circle"></i>
-              {{ selectedAppLabel }}
-              <button @click="clearSelection" class="clear-btn">
-                <i class="fas fa-times"></i>
-              </button>
-            </span>
-          </div>
-
-          <div class="search-box">
-            <i class="fas fa-search"></i>
-            <input
-              v-model="searchQuery"
-              type="text"
-              :placeholder="$t('webrtc.search_placeholder') || 'Search applications...'"
-              class="search-input"
-            />
-            <button v-if="searchQuery" @click="searchQuery = ''" class="search-clear">
-              <i class="fas fa-times"></i>
-            </button>
+    <!-- ══════════════════════════════════════════════
+         HERO SECTION — selected app spotlight
+    ══════════════════════════════════════════════ -->
+    <section class="xn-hero" v-if="selectedApp">
+      <div class="xn-hero-bg">
+        <img
+          v-if="appHasCover(selectedApp)"
+          :src="coverUrl(selectedApp)"
+          class="xn-hero-bg-img"
+          @error="onCoverError(selectedApp!)"
+          alt=""
+        />
+        <div class="xn-hero-overlay"></div>
+      </div>
+      <div class="xn-hero-content">
+        <div class="xn-hero-meta">
+          <div class="xn-hero-tag"><i class="fas fa-gamepad"></i> XtremeNode</div>
+          <h1 class="xn-hero-title">{{ selectedApp.name }}</h1>
+          <p class="xn-hero-sub">{{ appSubtitle(selectedApp) }}</p>
+          <div class="xn-hero-badges">
+            <span class="xn-badge"><i class="fas fa-desktop"></i> Stream to browser</span>
+            <span class="xn-badge"><i class="fas fa-bolt"></i> Low latency</span>
           </div>
         </div>
-
-        <!-- No apps at all -->
-        <div v-if="!appsList.length" class="empty-state">
-          <i class="fas fa-gamepad"></i>
-          <h3>No Applications</h3>
-          <p>Add games in the Applications tab to start streaming</p>
+        <div class="xn-hero-actions">
+          <button
+            class="xn-play-btn"
+            :disabled="isConnecting"
+            @click="isConnected ? disconnect() : connect()"
+          >
+            <i v-if="isConnecting" class="fas fa-circle-notch fa-spin"></i>
+            <i v-else-if="isConnected" class="fas fa-stop"></i>
+            <i v-else class="fas fa-play"></i>
+            {{ isConnecting ? 'Connecting...' : isConnected ? 'Disconnect' : 'Play' }}
+          </button>
+          <button class="xn-hero-icon-btn" @click="clearSelection" title="Back to library">
+            <i class="fas fa-arrow-left"></i>
+          </button>
         </div>
+      </div>
+    </section>
 
-        <!-- No search results -->
-        <div v-else-if="!filteredApps.length" class="empty-state">
+    <!-- ══════════════════════════════════════════════
+         MAIN BODY
+    ══════════════════════════════════════════════ -->
+    <div class="xn-body">
+
+      <!-- Search bar -->
+      <div class="xn-search-row">
+        <div class="xn-search-box">
           <i class="fas fa-search"></i>
-          <h3>No Results</h3>
-          <p>No applications match "{{ searchQuery }}"</p>
+          <input
+            v-model="searchQuery"
+            type="text"
+            :placeholder="$t('webrtc.search_placeholder') || 'Search games...'"
+            class="xn-search-input"
+          />
+          <button v-if="searchQuery" class="xn-search-clear" @click="searchQuery = ''">
+            <i class="fas fa-times"></i>
+          </button>
         </div>
+      </div>
 
-        <template v-else>
-          <!-- Games with Box Art -->
-          <div v-if="appsWithCovers.length" class="games-grid">
-            <button
+      <!-- Loading state -->
+      <div v-if="appsList.length === 0" class="xn-empty">
+        <i class="fas fa-spinner fa-spin xn-empty-icon"></i>
+        <p>Loading your library…</p>
+      </div>
+
+      <!-- No search results -->
+      <div v-else-if="filteredApps.length === 0" class="xn-empty">
+        <i class="fas fa-search xn-empty-icon"></i>
+        <p>No games match "{{ searchQuery }}"</p>
+        <button class="xn-clear-btn" @click="searchQuery = ''">Clear search</button>
+      </div>
+
+      <template v-else>
+
+        <!-- ── Row: Apps with cover art ── -->
+        <section class="xn-row" v-if="appsWithCovers.length > 0">
+          <div class="xn-row-header">
+            <h2 class="xn-row-title">Your Library</h2>
+            <span class="xn-row-count">{{ appsWithCovers.length }} games</span>
+          </div>
+          <div class="xn-tiles-track">
+            <div
               v-for="app in appsWithCovers"
               :key="appKey(app)"
+              class="xn-tile"
+              :class="{ selected: selectedAppId === appNumericId(app), running: hasRunningSession && selectedAppId === appNumericId(app) }"
               @click="selectApp(app)"
               @dblclick="onAppDoubleClick(app)"
-              class="game-card"
-              :class="{ selected: appNumericId(app) === selectedAppId }"
+              :title="app.name + '\nDouble-click to launch'"
             >
-              <div class="game-cover">
+              <div class="xn-tile-cover">
                 <img
-                  :src="coverUrl(app) || undefined"
-                  :alt="app.name || 'Application'"
-                  loading="lazy"
+                  :src="coverUrl(app)"
+                  :alt="app.name"
                   @load="onCoverLoad(app)"
                   @error="onCoverError(app)"
+                  class="xn-tile-img"
                 />
-                <div class="cover-gradient"></div>
-                <div v-if="appNumericId(app) === selectedAppId" class="selected-badge">
-                  <i class="fas fa-check"></i>
-                </div>
-                <div class="play-overlay">
-                  <i class="fas fa-play"></i>
+                <div class="xn-tile-hover">
+                  <i class="fas fa-play xn-tile-play"></i>
                 </div>
               </div>
-              <div class="game-meta">
-                <span class="game-name">{{ app.name || '(untitled)' }}</span>
-                <span class="game-source">{{ appSubtitle(app) }}</span>
+              <div class="xn-tile-footer">
+                <div class="xn-tile-badge xn-badge-xn"><i class="fas fa-play-circle"></i></div>
+                <div class="xn-tile-badge xn-badge-ctrl"><i class="fas fa-gamepad"></i></div>
               </div>
-            </button>
+            </div>
           </div>
+        </section>
 
-          <!-- Other Applications (no box art) -->
-          <div v-if="appsWithoutCovers.length" class="other-apps-section">
-            <h3 class="section-label">
-              <i class="fas fa-window-maximize"></i>
-              Other Applications
-            </h3>
-            <div class="apps-list">
-              <button
-                v-for="app in appsWithoutCovers"
-                :key="appKey(app)"
-                @click="selectApp(app)"
-                @dblclick="onAppDoubleClick(app)"
-                class="app-list-item"
-                :class="{ selected: appNumericId(app) === selectedAppId }"
-              >
-                <div class="app-icon">
-                  <i class="fas fa-window-maximize"></i>
-                </div>
-                <div class="app-info">
-                  <span class="app-name">{{ app.name || '(untitled)' }}</span>
-                  <span class="app-source">{{ appSubtitle(app) }}</span>
-                </div>
-                <div v-if="appNumericId(app) === selectedAppId" class="app-selected-icon">
-                  <i class="fas fa-check"></i>
-                </div>
-                <div class="app-play-icon">
-                  <i class="fas fa-play"></i>
-                </div>
+        <!-- ── Row: Apps without cover art ── -->
+        <section class="xn-row" v-if="appsWithoutCovers.length > 0">
+          <div class="xn-row-header">
+            <h2 class="xn-row-title">{{ appsWithCovers.length > 0 ? 'More Apps' : 'Your Library' }}</h2>
+            <span class="xn-row-count">{{ appsWithoutCovers.length }} apps</span>
+          </div>
+          <div class="xn-list-grid">
+            <div
+              v-for="app in appsWithoutCovers"
+              :key="appKey(app)"
+              class="xn-list-item"
+              :class="{ selected: selectedAppId === appNumericId(app) }"
+              @click="selectApp(app)"
+              @dblclick="onAppDoubleClick(app)"
+            >
+              <div class="xn-list-icon">
+                <i class="fas fa-desktop"></i>
+              </div>
+              <div class="xn-list-info">
+                <span class="xn-list-name">{{ app.name }}</span>
+                <span class="xn-list-sub">{{ appSubtitle(app) }}</span>
+              </div>
+              <button class="xn-list-play" @click.stop="onAppDoubleClick(app)" title="Launch">
+                <i class="fas fa-play"></i>
               </button>
             </div>
           </div>
-        </template>
-      </section>
+        </section>
 
-      <!-- Floating Stream Preview -->
-      <div
-        class="stream-preview"
-        :class="{ expanded: isFullscreen, minimized: streamMinimized && !isFullscreen }"
-      >
-        <div class="preview-header" v-if="!isFullscreen">
-          <div class="preview-title">
-            <i class="fas fa-tv"></i>
-            <span>Stream</span>
-            <span v-if="isConnected" class="live-indicator">
-              <span class="live-dot"></span>
-              LIVE
-            </span>
-          </div>
-          <div class="preview-controls">
-            <button
-              @click="streamMinimized = !streamMinimized"
-              class="control-btn"
-              v-if="!isFullscreen"
-            >
-              <i :class="streamMinimized ? 'fas fa-chevron-up' : 'fas fa-chevron-down'"></i>
-            </button>
-            <button @click="toggleFullscreen" class="control-btn">
-              <i :class="isFullscreen ? 'fas fa-compress' : 'fas fa-expand'"></i>
-            </button>
-          </div>
+      </template>
+
+      <!-- Resume banner -->
+      <div v-if="resumeAvailable && !selectedApp" class="xn-resume-bar">
+        <i class="fas fa-circle-play"></i>
+        <span>A session is already running</span>
+        <button class="xn-resume-btn" @click="connect()">Resume</button>
+      </div>
+
+    </div><!-- /xn-body -->
+
+    <!-- ══════════════════════════════════════════════
+         SETTINGS PANEL (slide-in)
+    ══════════════════════════════════════════════ -->
+    <transition name="settings-slide">
+      <aside class="xn-settings" v-if="showSettings">
+        <div class="xn-settings-header">
+          <h3>Stream Settings</h3>
+          <button class="xn-close-btn" @click="showSettings = false"><i class="fas fa-times"></i></button>
         </div>
+        <div class="xn-settings-body">
 
-        <div
-          ref="inputTarget"
-          class="stream-viewport"
-          :class="{ 'fullscreen-mode': isFullscreen }"
-          tabindex="0"
-          @dblclick="onFullscreenDblClick"
-        >
-          <video
-            ref="videoEl"
-            class="stream-video"
-            autoplay
-            playsinline
-            :controls="false"
-            disablePictureInPicture
-          ></video>
-          <audio ref="audioEl" class="hidden" autoplay playsinline></audio>
-
-          <!-- Idle State -->
-          <div v-if="!isConnected && !isConnecting" class="idle-state">
-            <div class="idle-content">
-              <i :class="selectedAppId ? 'fas fa-play-circle' : 'fas fa-desktop'"></i>
-              <p>
-                {{
-                  selectedAppId ? $t('webrtc.idle_game_selected') : $t('webrtc.idle_no_selection')
-                }}
-              </p>
+          <div class="xn-setting-group">
+            <label class="xn-setting-label">Resolution</label>
+            <div class="xn-preset-row">
+              <button class="xn-preset-btn" :class="{ active: config.width===1280 && config.height===720 }" @click="setResolution(1280,720)">720p</button>
+              <button class="xn-preset-btn" :class="{ active: config.width===1920 && config.height===1080 }" @click="setResolution(1920,1080)">1080p</button>
+              <button class="xn-preset-btn" :class="{ active: config.width===2560 && config.height===1440 }" @click="setResolution(2560,1440)">1440p</button>
+              <button class="xn-preset-btn" :class="{ active: config.width===3840 && config.height===2160 }" @click="setResolution(3840,2160)">4K</button>
             </div>
           </div>
 
-          <!-- Connecting State -->
-          <div v-if="showStartingOverlay" class="connecting-state">
-            <div class="spinner"></div>
-            <span>Connecting...</span>
-          </div>
-
-          <!-- Stats Overlay -->
-          <div v-if="showOverlay && isConnected" class="stats-overlay">
-            <div v-for="(line, idx) in overlayLines" :key="idx" class="stat-line">{{ line }}</div>
-          </div>
-
-          <!-- Notification -->
-          <Transition name="notification-fade">
-            <div
-              v-if="activeNotification"
-              class="notification-toast"
-              :class="activeNotification.type"
-            >
-              <i :class="notificationIcon"></i>
-              <div class="notification-text">
-                <strong>{{ activeNotification.title }}</strong>
-                <span v-if="activeNotification.message">{{ activeNotification.message }}</span>
-              </div>
-              <button @click="dismissNotification"><i class="fas fa-times"></i></button>
+          <div class="xn-setting-group">
+            <label class="xn-setting-label">Frame Rate</label>
+            <div class="xn-preset-row">
+              <button class="xn-preset-btn" :class="{ active: config.fps===30 }" @click="config.fps=30">30 fps</button>
+              <button class="xn-preset-btn" :class="{ active: config.fps===60 }" @click="config.fps=60">60 fps</button>
+              <button class="xn-preset-btn" :class="{ active: config.fps===120 }" @click="config.fps=120">120 fps</button>
             </div>
-          </Transition>
+          </div>
+
+          <div class="xn-setting-group">
+            <label class="xn-setting-label">Codec</label>
+            <div class="xn-preset-row">
+              <button
+                v-for="opt in encodingOptions"
+                :key="opt.value"
+                class="xn-preset-btn"
+                :class="{ active: config.encoding===opt.value }"
+                @click="config.encoding=opt.value"
+              >{{ opt.label }}</button>
+            </div>
+          </div>
+
+          <div class="xn-setting-group">
+            <label class="xn-setting-label">Bitrate (kbps)</label>
+            <n-input-number
+              v-model:value="config.bitrateKbps"
+              :min="1000"
+              :max="150000"
+              :step="1000"
+              size="small"
+              style="width:100%"
+            />
+          </div>
+
+          <div class="xn-setting-group">
+            <label class="xn-setting-label">Pacing Mode</label>
+            <div class="xn-preset-row">
+              <button
+                v-for="opt in pacingOptions"
+                :key="opt.value"
+                class="xn-preset-btn"
+                :class="{ active: config.videoPacingMode===opt.value }"
+                @click="applyPacingPreset(opt.value)"
+              >{{ opt.label }}</button>
+            </div>
+          </div>
+
+          <div class="xn-setting-group xn-setting-row">
+            <label class="xn-setting-label">HDR</label>
+            <n-switch v-model:value="config.hdr" size="small" />
+          </div>
+
+          <div class="xn-setting-group xn-setting-row">
+            <label class="xn-setting-label">Mute host audio</label>
+            <n-switch v-model:value="config.muteHostAudio" size="small" />
+          </div>
+
         </div>
+      </aside>
+    </transition>
 
-        <!-- Quick Actions Bar -->
-        <div class="quick-actions" v-if="!isFullscreen && !streamMinimized">
-          <button
-            @click="isConnected ? disconnect() : connect()"
-            class="action-btn primary"
-            :class="{ connected: isConnected, connecting: isConnecting }"
-            :disabled="isConnecting"
-          >
-            <i
-              :class="
-                isConnected
-                  ? 'fas fa-stop'
-                  : isConnecting
-                    ? 'fas fa-circle-notch fa-spin'
-                    : 'fas fa-play'
-              "
-            ></i>
-            <span>{{ $t(connectLabelKey) }}</span>
-          </button>
+    <!-- Settings backdrop -->
+    <div v-if="showSettings" class="xn-backdrop" @click="showSettings = false"></div>
 
-          <button
-            v-if="isConnected"
-            @click="terminateSession"
-            class="action-btn danger"
-            :disabled="terminatePending"
-          >
-            <i :class="terminatePending ? 'fas fa-circle-notch fa-spin' : 'fas fa-power-off'"></i>
-          </button>
-
-          <div class="quick-toggles">
-            <label class="toggle" title="Enable input forwarding">
-              <n-switch v-model:value="inputEnabled" :disabled="!isConnected" size="small" />
-              <span>Input</span>
-            </label>
-            <label class="toggle" title="Show performance overlay">
-              <n-switch v-model:value="showOverlay" size="small" />
-              <span>Stats</span>
-            </label>
-          </div>
+    <!-- ══════════════════════════════════════════════
+         STREAM OVERLAY (fullscreen video)
+    ══════════════════════════════════════════════ -->
+    <div class="xn-stream-overlay" v-show="isConnected || isConnecting">
+      <div class="xn-starting-screen" v-if="showStartingOverlay">
+        <div class="xn-starting-logo">
+          <i class="fas fa-play-circle"></i>
+          <span>Xtreme<span>Node</span></span>
         </div>
+        <div class="xn-starting-spinner"><i class="fas fa-circle-notch fa-spin"></i></div>
+        <p class="xn-starting-label">{{ selectedAppName ? 'Launching ' + selectedAppName : 'Connecting...' }}</p>
+      </div>
 
-        <!-- Compact Metrics -->
-        <div class="compact-metrics" v-if="isConnected && !isFullscreen && !streamMinimized">
-          <div class="metric">
-            <span class="label">Bitrate</span
-            ><span class="value">{{ formatKbps(stats.videoBitrateKbps) }}</span>
-          </div>
-          <div class="metric">
-            <span class="label">Latency</span
-            ><span class="value">{{ formatMs(smoothedLatencyMs) }}</span>
-          </div>
-          <div class="metric">
-            <span class="label">FPS</span
-            ><span class="value">{{ displayVideoFps ? displayVideoFps.toFixed(0) : '--' }}</span>
-          </div>
-          <div class="metric">
-            <span class="label">Dropped</span
-            ><span class="value">{{ stats.videoFramesDropped ?? '--' }}</span>
-          </div>
+      <div ref="inputTarget" class="xn-video-container" :class="{ visible: isConnected && !showStartingOverlay }">
+        <video
+          ref="videoEl"
+          class="xn-video"
+          autoplay
+          playsinline
+          :muted="!isConnected"
+        ></video>
+        <audio ref="audioEl" autoplay style="display:none"></audio>
+      </div>
+
+      <!-- HUD bar -->
+      <div class="xn-hud" :class="{ show: showOverlay && isConnected }">
+        <div class="xn-hud-left">
+          <span class="xn-hud-app"><i class="fas fa-play-circle"></i> {{ selectedAppName || 'XtremeNode' }}</span>
+        </div>
+        <div class="xn-hud-stats" v-if="isConnected">
+          <span v-if="displayVideoFps">{{ Math.round(displayVideoFps) }} fps</span>
+          <span v-if="smoothedLatencyMs">{{ Math.round(smoothedLatencyMs) }} ms</span>
+          <span v-if="stats.videoBitrateKbps">{{ Math.round(stats.videoBitrateKbps) }} kbps</span>
+        </div>
+        <div class="xn-hud-right">
+          <button class="xn-hud-btn" @click="disconnect()" title="Disconnect">
+            <i class="fas fa-stop"></i> Disconnect
+          </button>
         </div>
       </div>
     </div>
 
-    <!-- Settings Slideout -->
-    <Transition name="slideout">
-      <aside v-if="showSettings" class="settings-drawer">
-        <div class="drawer-header">
-          <h2><i class="fas fa-sliders-h"></i> {{ $t('webrtc.session_settings') }}</h2>
-          <button @click="showSettings = false" class="close-btn">
-            <i class="fas fa-times"></i>
-          </button>
+    <!-- Notifications -->
+    <transition name="notif-fade">
+      <div v-if="activeNotification" class="xn-notif" :class="activeNotification.type">
+        <i :class="notificationIcon"></i>
+        <div class="xn-notif-text">
+          <strong>{{ activeNotification.title }}</strong>
+          <span v-if="activeNotification.message">{{ activeNotification.message }}</span>
         </div>
+        <button class="xn-notif-close" @click="dismissNotification"><i class="fas fa-times"></i></button>
+      </div>
+    </transition>
 
-        <div class="drawer-content">
-          <!-- Resolution -->
-          <div class="setting-group">
-            <label class="group-label">{{ $t('webrtc.resolution') }}</label>
-            <div class="resolution-inputs">
-              <n-input-number v-model:value="config.width" :min="320" :max="7680" size="small" />
-              <span class="separator">×</span>
-              <n-input-number v-model:value="config.height" :min="180" :max="4320" size="small" />
-            </div>
-            <div class="preset-chips">
-              <button
-                @click="setResolution(1920, 1080)"
-                class="chip"
-                :class="{ active: config.width === 1920 && config.height === 1080 }"
-              >
-                1080p
-              </button>
-              <button
-                @click="setResolution(2560, 1440)"
-                class="chip"
-                :class="{ active: config.width === 2560 && config.height === 1440 }"
-              >
-                1440p
-              </button>
-              <button
-                @click="setResolution(3840, 2160)"
-                class="chip"
-                :class="{ active: config.width === 3840 && config.height === 2160 }"
-              >
-                4K
-              </button>
-            </div>
-          </div>
-
-          <!-- Frame Rate -->
-          <div class="setting-group">
-            <label class="group-label">{{ $t('webrtc.framerate') }}</label>
-            <div class="preset-chips">
-              <button @click="config.fps = 30" class="chip" :class="{ active: config.fps === 30 }">
-                30
-              </button>
-              <button @click="config.fps = 60" class="chip" :class="{ active: config.fps === 60 }">
-                60
-              </button>
-              <button
-                @click="config.fps = 120"
-                class="chip"
-                :class="{ active: config.fps === 120 }"
-              >
-                120
-              </button>
-              <button
-                @click="config.fps = 144"
-                class="chip"
-                :class="{ active: config.fps === 144 }"
-              >
-                144
-              </button>
-            </div>
-          </div>
-
-          <!-- Encoding -->
-          <div class="setting-group">
-            <label class="group-label">{{ $t('webrtc.encoding') }}</label>
-            <div class="preset-chips">
-              <button
-                v-for="opt in encodingOptions"
-                :key="opt.value"
-                @click="config.encoding = opt.value"
-                class="chip"
-                :class="{ active: config.encoding === opt.value, unsupported: !opt.supported }"
-                :title="opt.supported ? undefined : opt.hint"
-              >
-                {{ opt.label }}
-              </button>
-            </div>
-          </div>
-
-          <!-- Bitrate -->
-          <div class="setting-group">
-            <label class="group-label">{{ $t('webrtc.bitrate') }}</label>
-            <n-input-number
-              v-model:value="config.bitrateKbps"
-              :min="500"
-              :max="200000"
-              size="small"
-              class="full-width"
-            />
-            <div class="preset-chips">
-              <button
-                @click="config.bitrateKbps = 10000"
-                class="chip"
-                :class="{ active: config.bitrateKbps === 10000 }"
-              >
-                10 Mbps
-              </button>
-              <button
-                @click="config.bitrateKbps = 30000"
-                class="chip"
-                :class="{ active: config.bitrateKbps === 30000 }"
-              >
-                30 Mbps
-              </button>
-              <button
-                @click="config.bitrateKbps = 60000"
-                class="chip"
-                :class="{ active: config.bitrateKbps === 60000 }"
-              >
-                60 Mbps
-              </button>
-            </div>
-          </div>
-
-          <!-- HDR Toggle -->
-          <div class="setting-group toggle-setting">
-            <div class="toggle-info">
-              <label class="group-label">{{ $t('webrtc.hdr') }}</label>
-              <p class="hint">{{ $t('webrtc.hdr_desc') }}</p>
-            </div>
-            <n-switch v-model:value="config.hdr" />
-          </div>
-          <n-alert v-if="hdrInlineWarning" type="warning" :show-icon="true" class="setting-alert">
-            {{ hdrInlineWarning }}
-          </n-alert>
-
-          <!-- Mute Host Audio -->
-          <div class="setting-group toggle-setting">
-            <div class="toggle-info">
-              <label class="group-label">{{ $t('webrtc.mute_host_audio') }}</label>
-              <p class="hint">{{ $t('webrtc.mute_host_audio_desc') }}</p>
-            </div>
-            <n-switch v-model:value="config.muteHostAudio" />
-          </div>
-
-          <!-- Frame Pacing -->
-          <div class="setting-group">
-            <label class="group-label">{{ $t('webrtc.frame_pacing') }}</label>
-            <p class="hint">{{ $t('webrtc.frame_pacing_desc') }}</p>
-            <div class="preset-chips">
-              <button
-                v-for="opt in pacingOptions"
-                :key="opt.value"
-                @click="applyPacingPreset(opt.value)"
-                class="chip"
-                :class="{ active: config.videoPacingMode === opt.value }"
-                :disabled="isConnected"
-              >
-                {{ opt.label }}
-              </button>
-            </div>
-            <div class="setting-group">
-              <label class="group-label">{{ $t('webrtc.frame_pacing_slack') }}</label>
-              <n-input-number
-                v-model:value="config.videoPacingSlackMs"
-                :min="0"
-                :max="10"
-                size="small"
-                class="full-width"
-                :disabled="isConnected"
-              />
-            </div>
-            <div class="setting-group">
-              <label class="group-label">{{ $t('webrtc.frame_pacing_max_delay') }}</label>
-              <n-input-number
-                v-model:value="maxFrameAgeFrames"
-                :min="1"
-                :max="maxAllowedFramesForFps(config.fps)"
-                size="small"
-                class="full-width"
-                :disabled="isConnected"
-              />
-            </div>
-          </div>
-
-
-          <!-- GStreamer Ultra-Low Latency Toggle -->
-          <div class="setting-group toggle-setting gstreamer-setting">
-            <div class="toggle-info">
-              <label class="group-label">
-                <i class="fas fa-bolt" style="color:#f90;margin-right:4px"></i>
-                GStreamer Ultra-Low Latency
-              </label>
-              <p class="hint">Enable GStreamer pipeline for near-zero latency. Requires GStreamer installed on the host.</p>
-            </div>
-            <n-switch v-model:value="config.useGstreamer" :disabled="isConnected" />
-          </div>
-          <n-alert v-if="config.useGstreamer" type="warning" :show-icon="true" class="setting-alert">
-            GStreamer mode bypasses WebRTC buffering for minimal latency. Ensure <b>gstreamer</b> is installed on the host machine.
-          </n-alert>
-
-          <!-- Advanced Options -->
-          <details class="advanced-section">
-            <summary><i class="fas fa-cogs"></i> Advanced Options</summary>
-            <div class="advanced-content">
-              <div class="setting-group toggle-setting">
-                <div class="toggle-info">
-                  <label class="group-label">Auto Fullscreen</label>
-                  <p class="hint">Enter fullscreen when stream starts</p>
-                </div>
-                <n-switch v-model:value="autoFullscreen" size="small" />
-              </div>
-            </div>
-          </details>
-        </div>
-
-        <!-- Drawer Footer -->
-        <div class="drawer-footer">
-          <p class="notice">
-            <i class="fas fa-info-circle"></i>
-            {{ $t('webrtc.experimental_notice') }}
-          </p>
-        </div>
-      </aside>
-    </Transition>
-
-    <!-- Backdrop for settings -->
-    <Transition name="fade">
-      <div v-if="showSettings" class="drawer-backdrop" @click="showSettings = false"></div>
-    </Transition>
   </div>
 </template>
 <script setup lang="ts">
@@ -971,6 +773,11 @@ const selectedAppName = computed(() => {
   return selected?.name ?? null;
 });
 
+
+const selectedApp = computed(() => {
+  if (!selectedAppId.value) return null;
+  return appsList.value.find((app) => appNumericId(app) === selectedAppId.value) ?? null;
+});
 const hasRunningSession = computed(() => {
   if (!sessionStatus.value) return false;
   return sessionStatus.value.appRunning || sessionStatus.value.activeSessions > 0;
@@ -3071,1331 +2878,388 @@ watch(
   },
 );
 </script>
-
 <style scoped>
-/* ============================================
-   MODERN WEBRTC UI
-   ============================================ */
-
-.webrtc-app {
-  --accent: rgb(var(--color-primary));
-  --surface: rgb(var(--color-surface));
-  --border: rgb(var(--color-dark) / 0.1);
-  --text-1: rgb(var(--color-on-light));
-  --text-2: rgb(var(--color-on-light) / 0.7);
-  --text-3: rgb(var(--color-on-light) / 0.5);
-
-  display: flex;
-  min-height: 100vh;
-  background: linear-gradient(135deg, rgb(var(--color-light)) 0%, rgb(var(--color-surface)) 100%);
-  transition: padding-right 0.3s ease;
-}
-
-.dark .webrtc-app {
-  --border: rgb(255 255 255 / 0.08);
-  --text-1: rgb(var(--color-on-dark));
-  --text-2: rgb(var(--color-on-dark) / 0.7);
-  --text-3: rgb(var(--color-on-dark) / 0.5);
-  background: linear-gradient(135deg, rgb(var(--color-dark)) 0%, rgb(10 12 20) 100%);
-}
-
-.webrtc-app.settings-open {
-  padding-right: 380px;
-}
-
-@media (max-width: 768px) {
-  .webrtc-app.settings-open {
-    padding-right: 0;
-  }
-}
-
-.main-content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-/* Header */
-.app-header {
-  display: none !important;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 1rem 1.5rem;
-  border-bottom: 1px solid var(--border);
-  background: rgb(var(--color-surface) / 0.5);
-  backdrop-filter: blur(10px);
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-
-.header-left,
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.header-center {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 0.625rem;
-}
-
-.brand-icon {
-  width: 2rem;
-  height: 2rem;
-  background: linear-gradient(135deg, rgb(var(--color-primary)), rgb(var(--color-secondary)));
-  border-radius: 0.5rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  font-size: 0.875rem;
-  box-shadow: 0 2px 8px rgb(var(--color-primary) / 0.25);
-}
-
-.brand h1 {
-  font-size: 1rem;
-  font-weight: 600;
-  margin: 0;
-  color: var(--text-1);
-}
-
-.status-pill {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.375rem 0.875rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 2rem;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--text-2);
-  transition: all 0.2s;
-}
-
-.status-pill.connected {
-  background: rgb(var(--color-success) / 0.1);
-  border-color: rgb(var(--color-success) / 0.3);
-  color: rgb(var(--color-success));
-}
-
-.status-pill.connecting {
-  background: rgb(var(--color-warning) / 0.1);
-  border-color: rgb(var(--color-warning) / 0.3);
-  color: rgb(var(--color-warning));
-}
-
-.status-dot {
-  width: 0.5rem;
-  height: 0.5rem;
-  background: currentColor;
-  border-radius: 50%;
-  animation: pulse 2s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  0%,
-  100% {
-    opacity: 0.5;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-.settings-btn {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.875rem;
-  background: rgb(var(--color-primary) / 0.1);
-  border: 1px solid rgb(var(--color-primary) / 0.2);
-  border-radius: 0.5rem;
-  color: rgb(var(--color-primary));
-  font-size: 0.8125rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.settings-btn i {
-  font-size: 0.875rem;
-}
-
-.settings-btn:hover {
-  background: rgb(var(--color-primary) / 0.15);
-  border-color: rgb(var(--color-primary) / 0.35);
-}
-
-.settings-btn.active {
-  background: rgb(var(--color-primary));
-  border-color: rgb(var(--color-primary));
-  color: white;
-}
-
-/* Library Section */
-.library-section {
-  flex: 1;
-  padding: 1.5rem;
-  overflow-y: auto;
-}
-
-.library-header {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  margin-bottom: 1.25rem;
-}
-
-.library-title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-}
-
-.library-header h2 {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 1.125rem;
-  font-weight: 600;
-  margin: 0;
-  color: var(--text-1);
-}
-
-.library-header h2 i {
-  color: rgb(var(--color-primary));
-}
-
-/* Search Box */
-.search-box {
-  display: flex;
-  align-items: center;
-  gap: 0.625rem;
-  padding: 0.625rem 0.875rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  transition: all 0.2s;
-}
-
-.search-box:focus-within {
-  border-color: rgb(var(--color-primary) / 0.5);
-  box-shadow: 0 0 0 3px rgb(var(--color-primary) / 0.1);
-}
-
-.search-box i {
-  color: var(--text-3);
-  font-size: 0.875rem;
-}
-
-.search-input {
-  flex: 1;
-  background: none;
-  border: none;
-  outline: none;
-  font-size: 0.875rem;
-  color: var(--text-1);
-  min-width: 0;
-}
-
-.search-input::placeholder {
-  color: var(--text-3);
-}
-
-.search-clear {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.25rem;
-  height: 1.25rem;
-  background: var(--text-3);
-  border: none;
-  border-radius: 50%;
-  color: var(--surface);
-  font-size: 0.625rem;
-  cursor: pointer;
-  opacity: 0.6;
-  transition: opacity 0.2s;
-}
-
-.search-clear:hover {
-  opacity: 1;
-}
-
-.selection-badge {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.375rem 0.75rem;
-  background: rgb(var(--color-primary) / 0.1);
-  border: 1px solid rgb(var(--color-primary) / 0.3);
-  border-radius: 0.5rem;
-  font-size: 0.75rem;
-  font-weight: 500;
-  color: rgb(var(--color-primary));
-}
-
-.selection-badge i {
-  font-size: 0.75rem;
-}
-
-.clear-btn {
-  background: none;
-  border: none;
-  padding: 0.25rem;
-  cursor: pointer;
-  color: inherit;
-  opacity: 0.7;
-  transition: opacity 0.2s;
-}
-
-.clear-btn:hover {
-  opacity: 1;
-}
-
-/* Games Grid */
-.games-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 1rem;
-}
-
-@media (min-width: 1200px) {
-  .games-grid {
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  }
-}
-
-.game-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 0.75rem;
-  overflow: hidden;
-  cursor: pointer;
-  transition: all 0.2s;
-  text-align: left;
-}
-
-.game-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.15);
-  border-color: rgb(var(--color-primary) / 0.3);
-}
-
-.game-card.selected {
-  border-color: rgb(var(--color-primary));
-  box-shadow:
-    0 0 0 2px rgb(var(--color-primary) / 0.2),
-    0 8px 24px rgb(0 0 0 / 0.15);
-}
-
-.game-cover {
+/* ═══════════════════════════════════════════════════════
+   ROOT
+═══════════════════════════════════════════════════════ */
+.xn-root {
   position: relative;
-  aspect-ratio: 3 / 4;
-  background: rgb(var(--color-dark) / 0.1);
+  min-height: 100vh;
+  background: #0e0e0e;
+  color: #f0f0f0;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  overflow-x: hidden;
+}
+
+/* ═══════════════════════════════════════════════════════
+   TOP NAV
+═══════════════════════════════════════════════════════ */
+.xn-nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2rem;
+  height: 56px;
+  background: rgba(14,14,14,0.95);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.xn-nav-left { display: flex; align-items: center; }
+.xn-nav-right { display: flex; align-items: center; gap: 1rem; }
+
+.xn-logo { display: flex; align-items: center; gap: 0.5rem; }
+.xn-logo-icon { color: #107c10; font-size: 1.3rem; }
+.xn-logo-brand { font-weight: 800; font-size: 1rem; letter-spacing: 0.05em; color: #fff; }
+.xn-logo-accent { color: #107c10; }
+.xn-logo-divider { color: #444; margin: 0 0.25rem; }
+.xn-logo-sub { font-size: 0.65rem; font-weight: 700; letter-spacing: 0.15em; color: #888; text-transform: uppercase; }
+
+.xn-nav-btn {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.12);
+  color: #ccc;
+  border-radius: 6px;
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.xn-nav-btn:hover, .xn-nav-btn.active { background: rgba(255,255,255,0.1); color: #fff; border-color: rgba(255,255,255,0.25); }
+
+.xn-status-badge {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 0.75rem; font-weight: 600;
+  padding: 4px 12px; border-radius: 20px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: #999;
+}
+.xn-status-dot { width: 7px; height: 7px; border-radius: 50%; background: #555; }
+.xn-status-badge.connected { color: #4ade80; border-color: rgba(74,222,128,0.3); background: rgba(74,222,128,0.08); }
+.xn-status-badge.connected .xn-status-dot { background: #4ade80; box-shadow: 0 0 6px #4ade80; }
+.xn-status-badge.connecting { color: #fbbf24; border-color: rgba(251,191,36,0.3); background: rgba(251,191,36,0.08); }
+.xn-status-badge.connecting .xn-status-dot { background: #fbbf24; }
+
+/* ═══════════════════════════════════════════════════════
+   HERO
+═══════════════════════════════════════════════════════ */
+.xn-hero {
+  position: relative;
+  height: 340px;
   overflow: hidden;
 }
-
-.game-cover img {
-  width: 100%;
-  height: 100%;
+.xn-hero-bg { position: absolute; inset: 0; }
+.xn-hero-bg-img {
+  width: 100%; height: 100%;
   object-fit: cover;
-  transition: transform 0.3s;
-}
-
-.game-card:hover .game-cover img {
+  object-position: center top;
+  filter: blur(2px) brightness(0.55);
   transform: scale(1.05);
 }
-
-.cover-gradient {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(180deg, transparent 50%, rgb(0 0 0 / 0.7) 100%);
+.xn-hero-overlay {
+  position: absolute; inset: 0;
+  background: linear-gradient(90deg, rgba(14,14,14,0.95) 35%, rgba(14,14,14,0.4) 70%, rgba(14,14,14,0.1) 100%),
+              linear-gradient(to top, rgba(14,14,14,1) 0%, transparent 50%);
 }
-
-.selected-badge {
-  position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
-  width: 1.5rem;
-  height: 1.5rem;
-  background: rgb(var(--color-primary));
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  font-size: 0.625rem;
-}
-
-.play-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgb(var(--color-primary) / 0.9);
-  color: white;
-  font-size: 2rem;
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-
-.game-card:hover .play-overlay {
-  opacity: 1;
-}
-
-.game-meta {
-  padding: 0.75rem;
-}
-
-.game-name {
-  display: block;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: var(--text-1);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.game-source {
-  display: block;
-  font-size: 0.6875rem;
-  color: var(--text-3);
-  margin-top: 0.125rem;
-}
-
-/* Other Applications Section (list view) */
-.other-apps-section {
-  margin-top: 1.5rem;
-  padding-top: 1.5rem;
-  border-top: 1px solid var(--border);
-}
-
-.section-label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: var(--text-2);
-  margin: 0 0 0.875rem;
-}
-
-.section-label i {
-  font-size: 0.75rem;
-  opacity: 0.7;
-}
-
-.apps-list {
+.xn-hero-content {
+  position: relative; z-index: 2;
+  height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 0.375rem;
+  justify-content: flex-end;
+  padding: 2.5rem 2.5rem;
+  gap: 1.25rem;
 }
-
-.app-list-item {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.625rem 0.875rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
+.xn-hero-meta { display: flex; flex-direction: column; gap: 0.4rem; max-width: 480px; }
+.xn-hero-tag { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #107c10; }
+.xn-hero-title { font-size: 2.4rem; font-weight: 800; line-height: 1.1; color: #fff; margin: 0; }
+.xn-hero-sub { font-size: 0.85rem; color: #aaa; margin: 0; }
+.xn-hero-badges { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+.xn-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 0.72rem; font-weight: 600;
+  padding: 3px 10px; border-radius: 4px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: #ccc;
+}
+.xn-hero-actions { display: flex; align-items: center; gap: 0.75rem; }
+.xn-play-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 12px 28px; border-radius: 4px;
+  background: #107c10;
+  color: #fff;
+  border: none;
+  font-size: 1rem; font-weight: 700;
   cursor: pointer;
-  transition: all 0.15s;
-  text-align: left;
+  transition: background 0.2s;
+  letter-spacing: 0.02em;
 }
-
-.app-list-item:hover {
-  background: rgb(var(--color-primary) / 0.05);
-  border-color: rgb(var(--color-primary) / 0.2);
+.xn-play-btn:hover:not(:disabled) { background: #13a013; }
+.xn-play-btn:disabled { background: #1a4a1a; color: #5a8a5a; cursor: not-allowed; }
+.xn-hero-icon-btn {
+  width: 44px; height: 44px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.15);
+  color: #ccc;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; font-size: 1rem;
+  transition: all 0.2s;
 }
+.xn-hero-icon-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }
 
-.app-list-item.selected {
-  background: rgb(var(--color-primary) / 0.1);
-  border-color: rgb(var(--color-primary) / 0.4);
+/* ═══════════════════════════════════════════════════════
+   BODY
+═══════════════════════════════════════════════════════ */
+.xn-body { padding: 1.5rem 2rem 4rem; }
+
+/* Search */
+.xn-search-row { margin-bottom: 1.75rem; }
+.xn-search-box {
+  position: relative;
+  max-width: 360px;
+  display: flex; align-items: center;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  padding: 0 12px;
+  gap: 8px;
+  transition: border-color 0.2s;
 }
-
-.app-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  background: rgb(var(--color-primary) / 0.1);
-  border-radius: 0.375rem;
-  color: rgb(var(--color-primary));
-  font-size: 0.875rem;
-  flex-shrink: 0;
-}
-
-.app-info {
+.xn-search-box:focus-within { border-color: rgba(255,255,255,0.25); background: rgba(255,255,255,0.08); }
+.xn-search-box i { color: #666; font-size: 0.85rem; flex-shrink: 0; }
+.xn-search-input {
   flex: 1;
-  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #f0f0f0;
+  font-size: 0.9rem;
+  padding: 10px 0;
 }
+.xn-search-input::placeholder { color: #555; }
+.xn-search-clear { background: transparent; border: none; color: #666; cursor: pointer; padding: 4px; }
+.xn-search-clear:hover { color: #aaa; }
 
-.app-info .app-name {
-  display: block;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  color: var(--text-1);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.app-info .app-source {
-  display: block;
-  font-size: 0.6875rem;
-  color: var(--text-3);
-  margin-top: 0.125rem;
-}
-
-.app-selected-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.5rem;
-  height: 1.5rem;
-  background: rgb(var(--color-primary));
-  border-radius: 50%;
-  color: white;
-  font-size: 0.625rem;
-  flex-shrink: 0;
-}
-
-.app-play-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.5rem;
-  height: 1.5rem;
-  color: var(--text-3);
-  font-size: 0.75rem;
-  flex-shrink: 0;
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-
-.app-list-item:hover .app-play-icon {
-  opacity: 1;
-  color: rgb(var(--color-primary));
-}
-
-.app-list-item.selected .app-play-icon {
-  display: none;
-}
-
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 4rem 2rem;
-  text-align: center;
-  color: var(--text-3);
-}
-
-.empty-state i {
-  font-size: 3rem;
-  opacity: 0.3;
+/* Rows */
+.xn-row { margin-bottom: 2.5rem; }
+.xn-row-header {
+  display: flex; align-items: baseline; justify-content: space-between;
   margin-bottom: 1rem;
 }
+.xn-row-title { font-size: 1.1rem; font-weight: 700; color: #f0f0f0; }
+.xn-row-count { font-size: 0.75rem; color: #666; }
 
-.empty-state h3 {
-  font-size: 1.125rem;
-  font-weight: 600;
-  color: var(--text-2);
-  margin: 0 0 0.5rem;
-}
-
-.empty-state p {
-  margin: 0;
-  font-size: 0.875rem;
-}
-
-/* Stream Preview */
-.stream-preview {
-  position: fixed;
-  bottom: 1.5rem;
-  right: 1.5rem;
-  width: 400px;
-  background: rgb(var(--color-surface));
-  border: 1px solid var(--border);
-  border-radius: 1rem;
-  overflow: hidden;
-  box-shadow: 0 8px 32px rgb(0 0 0 / 0.2);
-  z-index: 100;
-  transition: all 0.3s ease;
-}
-
-.webrtc-app.settings-open .stream-preview {
-  right: calc(380px + 1.5rem);
-}
-
-@media (max-width: 768px) {
-  .stream-preview {
-    width: calc(100% - 2rem);
-    left: 1rem;
-    right: 1rem;
-  }
-
-  .webrtc-app.settings-open .stream-preview {
-    right: 1rem;
-  }
-}
-
-.stream-preview.minimized {
-  width: 280px;
-}
-
-.stream-preview.minimized .stream-viewport,
-.stream-preview.minimized .quick-actions,
-.stream-preview.minimized .compact-metrics {
-  display: none;
-}
-
-.stream-preview.expanded {
-  position: fixed;
-  inset: 0;
-  width: 100%;
-  border-radius: 0;
-  z-index: 9999;
-}
-
-.preview-header {
+/* Tile track — horizontal scroll */
+.xn-tiles-track {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.75rem 1rem;
-  background: rgb(var(--color-dark) / 0.03);
-  border-bottom: 1px solid var(--border);
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: #333 transparent;
 }
+.xn-tiles-track::-webkit-scrollbar { height: 4px; }
+.xn-tiles-track::-webkit-scrollbar-track { background: transparent; }
+.xn-tiles-track::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
 
-.dark .preview-header {
-  background: rgb(0 0 0 / 0.2);
-}
-
-.preview-title {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: var(--text-1);
-}
-
-.preview-title i {
-  color: rgb(var(--color-primary));
-}
-
-.live-indicator {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.125rem 0.5rem;
-  background: rgb(var(--color-danger));
-  border-radius: 0.25rem;
-  font-size: 0.5625rem;
-  font-weight: 700;
-  color: white;
-}
-
-.live-dot {
-  width: 0.375rem;
-  height: 0.375rem;
-  background: white;
-  border-radius: 50%;
-  animation: blink 1s ease-in-out infinite;
-}
-
-@keyframes blink {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.3;
-  }
-}
-
-.preview-controls {
-  display: flex;
-  gap: 0.25rem;
-}
-
-.control-btn {
-  width: 1.75rem;
-  height: 1.75rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  border-radius: 0.375rem;
-  color: var(--text-2);
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.control-btn:hover {
-  background: rgb(var(--color-primary) / 0.1);
-  color: rgb(var(--color-primary));
-}
-
-/* Stream Viewport */
-.stream-viewport {
+/* Individual tile */
+.xn-tile {
   position: relative;
-  aspect-ratio: 16 / 9;
-  background: rgb(0 0 0);
-  outline: none;
-}
-
-.stream-viewport.fullscreen-mode {
-  position: fixed;
-  inset: 0;
-  aspect-ratio: unset;
-  z-index: 9999;
-  cursor: none;
-}
-
-.stream-video {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-.pacer-source-hidden {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 1px !important;
-  height: 1px !important;
-  opacity: 0 !important;
-  pointer-events: none !important;
-}
-
-.hidden {
-  display: none !important;
-}
-
-.idle-state {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(
-    135deg,
-    rgb(var(--color-surface)) 0%,
-    rgb(var(--color-dark) / 0.8) 100%
-  );
-}
-
-.idle-content {
-  text-align: center;
-  color: var(--text-3);
-}
-
-.idle-content i {
-  font-size: 2.5rem;
-  opacity: 0.4;
-  margin-bottom: 0.75rem;
-  display: block;
-}
-
-.idle-content p {
-  margin: 0;
-  font-size: 0.8125rem;
-}
-
-.connecting-state {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 1rem;
-  background: rgb(0 0 0 / 0.85);
-  backdrop-filter: blur(8px);
-}
-
-.spinner {
-  width: 2.5rem;
-  height: 2.5rem;
-  border: 3px solid var(--border);
-  border-top-color: rgb(var(--color-primary));
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-  /* Force GPU layer for smooth animation during heavy JS work */
-  will-change: transform;
-  transform: translateZ(0);
-  backface-visibility: hidden;
-}
-
-@keyframes spin {
-  to {
-    transform: translateZ(0) rotate(360deg);
-  }
-}
-
-.connecting-state span {
-  font-size: 0.875rem;
-  color: var(--text-2);
-}
-
-.stats-overlay {
-  position: absolute;
-  top: 0.5rem;
-  left: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  background: rgb(0 0 0 / 0.75);
-  border-radius: 0.375rem;
-  backdrop-filter: blur(8px);
-}
-
-.stat-line {
-  font-family: ui-monospace, monospace;
-  font-size: 0.625rem;
-  line-height: 1.5;
-  color: rgb(255 255 255 / 0.85);
-}
-
-/* Notification */
-.notification-toast {
-  position: absolute;
-  top: 0.75rem;
-  right: 0.75rem;
-  display: flex;
-  align-items: flex-start;
-  gap: 0.75rem;
-  padding: 0.75rem 1rem;
-  background: rgb(30 30 35 / 0.95);
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  backdrop-filter: blur(12px);
-  max-width: 300px;
-}
-
-.notification-toast.error {
-  border-color: rgb(var(--color-danger) / 0.4);
-}
-
-.notification-toast.warning {
-  border-color: rgb(var(--color-warning) / 0.4);
-}
-
-.notification-toast.success {
-  border-color: rgb(var(--color-success) / 0.4);
-}
-
-.notification-toast i {
-  font-size: 1rem;
-  margin-top: 0.125rem;
-}
-
-.notification-toast.error i {
-  color: rgb(var(--color-danger));
-}
-.notification-toast.warning i {
-  color: rgb(var(--color-warning));
-}
-.notification-toast.success i {
-  color: rgb(var(--color-success));
-}
-.notification-toast.info i {
-  color: rgb(var(--color-info));
-}
-
-.notification-text {
-  flex: 1;
-  min-width: 0;
-}
-
-.notification-text strong {
-  display: block;
-  font-size: 0.8125rem;
-  color: white;
-}
-
-.notification-text span {
-  display: block;
-  font-size: 0.75rem;
-  color: rgb(255 255 255 / 0.7);
-  margin-top: 0.125rem;
-}
-
-.notification-toast button {
-  background: none;
-  border: none;
-  padding: 0.25rem;
-  color: rgb(255 255 255 / 0.5);
-  cursor: pointer;
-}
-
-.notification-toast button:hover {
-  color: white;
-}
-
-.notification-fade-enter-active,
-.notification-fade-leave-active {
-  transition: all 0.3s ease;
-}
-
-.notification-fade-enter-from,
-.notification-fade-leave-to {
-  opacity: 0;
-  transform: translateY(-10px);
-}
-
-/* Quick Actions */
-.quick-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.75rem 1rem;
-  border-top: 1px solid var(--border);
-}
-
-.action-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 0.625rem 1.25rem;
-  border: none;
-  border-radius: 0.5rem;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.action-btn.primary {
-  flex: 1;
-  background: rgb(var(--color-primary));
-  color: rgb(var(--color-on-primary));
-}
-
-.action-btn.primary:hover:not(:disabled) {
-  filter: brightness(1.1);
-  box-shadow: 0 4px 16px rgb(var(--color-primary) / 0.35);
-}
-
-.action-btn.primary.connected {
-  background: rgb(var(--color-danger) / 0.15);
-  border: 1px solid rgb(var(--color-danger) / 0.4);
-  color: rgb(var(--color-danger));
-}
-
-.action-btn.primary.connecting {
-  opacity: 0.7;
-  cursor: wait;
-}
-
-.action-btn.danger {
-  padding: 0.625rem;
-  background: transparent;
-  border: 1px solid rgb(var(--color-warning) / 0.4);
-  color: rgb(var(--color-warning));
-}
-
-.action-btn.danger:hover:not(:disabled) {
-  background: rgb(var(--color-warning) / 0.1);
-}
-
-.action-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.quick-toggles {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-left: auto;
-}
-
-.toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  font-size: 0.6875rem;
-  color: var(--text-2);
-  cursor: pointer;
-}
-
-/* Compact Metrics */
-.compact-metrics {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 0.5rem;
-  padding: 0.75rem 1rem;
-  border-top: 1px solid var(--border);
-  background: rgb(var(--color-dark) / 0.02);
-}
-
-.dark .compact-metrics {
-  background: rgb(0 0 0 / 0.15);
-}
-
-.metric {
-  text-align: center;
-}
-
-.metric .label {
-  display: block;
-  font-size: 0.5625rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--text-3);
-}
-
-.metric .value {
-  display: block;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: var(--text-1);
-}
-
-/* Settings Drawer */
-.settings-drawer {
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 380px;
-  background: rgb(var(--color-surface));
-  border-left: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  z-index: 200;
-  box-shadow: -8px 0 32px rgb(0 0 0 / 0.15);
-}
-
-@media (max-width: 768px) {
-  .settings-drawer {
-    width: 100%;
-  }
-}
-
-.drawer-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 1.25rem 1.5rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.drawer-header h2 {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 1rem;
-  font-weight: 600;
-  margin: 0;
-  color: var(--text-1);
-}
-
-.drawer-header h2 i {
-  color: rgb(var(--color-primary));
-}
-
-.close-btn {
-  width: 2rem;
-  height: 2rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  border-radius: 0.375rem;
-  color: var(--text-2);
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.close-btn:hover {
-  background: rgb(var(--color-danger) / 0.1);
-  color: rgb(var(--color-danger));
-}
-
-.drawer-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 1.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-}
-
-.setting-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.group-label {
-  font-size: 0.6875rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-3);
-}
-
-.resolution-inputs {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.separator {
-  color: var(--text-3);
-}
-
-.preset-chips {
-  display: flex;
-  gap: 0.375rem;
-  flex-wrap: wrap;
-}
-
-.chip {
-  flex: 1;
-  min-width: 60px;
-  padding: 0.5rem 0.75rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  font-size: 0.75rem;
-  font-weight: 500;
-  color: var(--text-2);
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.chip:hover {
-  background: rgb(var(--color-primary) / 0.1);
-  border-color: rgb(var(--color-primary) / 0.3);
-  color: var(--text-1);
-}
-
-.chip.active {
-  background: rgb(var(--color-primary));
-  border-color: rgb(var(--color-primary));
-  color: rgb(var(--color-on-primary));
-  font-weight: 600;
-}
-
-.chip.unsupported {
-  border-style: dashed;
-  opacity: 0.6;
-}
-
-.toggle-setting {
-  flex-direction: row;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding-top: 1rem;
-  border-top: 1px solid var(--border);
-}
-
-.toggle-info {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.hint {
-  font-size: 0.6875rem;
-  color: var(--text-3);
-  margin: 0;
-  line-height: 1.4;
-}
-
-.setting-alert {
-  margin-top: 0.5rem;
-}
-
-.full-width {
-  width: 100%;
-}
-
-/* Advanced Section */
-.advanced-section {
-  margin-top: 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
+  flex-shrink: 0;
+  width: 150px;
+  border-radius: 6px;
   overflow: hidden;
-}
-
-.advanced-section summary {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.75rem 1rem;
-  background: rgb(var(--color-dark) / 0.03);
-  font-size: 0.8125rem;
-  font-weight: 500;
-  color: var(--text-2);
   cursor: pointer;
-  list-style: none;
+  transition: transform 0.2s, box-shadow 0.2s;
+  border: 2px solid transparent;
 }
-
-.dark .advanced-section summary {
-  background: rgb(0 0 0 / 0.15);
+.xn-tile:hover { transform: scale(1.05); box-shadow: 0 8px 24px rgba(0,0,0,0.6); }
+.xn-tile.selected { border-color: #107c10; box-shadow: 0 0 0 1px #107c10, 0 8px 24px rgba(16,124,16,0.4); }
+.xn-tile.running { border-color: #4ade80; }
+.xn-tile-cover { position: relative; aspect-ratio: 3/4; background: #1a1a1a; }
+.xn-tile-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.xn-tile-hover {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity 0.2s;
 }
-
-.advanced-section summary::-webkit-details-marker {
-  display: none;
+.xn-tile:hover .xn-tile-hover { opacity: 1; }
+.xn-tile-play { font-size: 2rem; color: #fff; text-shadow: 0 2px 8px rgba(0,0,0,0.8); }
+.xn-tile-footer {
+  position: absolute; bottom: 6px; left: 6px;
+  display: flex; gap: 4px;
 }
-
-.advanced-section summary i {
-  color: rgb(var(--color-primary));
-}
-
-.advanced-content {
-  padding: 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  border-top: 1px solid var(--border);
-}
-
-.drawer-footer {
-  padding: 1rem 1.5rem;
-  border-top: 1px solid var(--border);
-}
-
-.notice {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
-  font-size: 0.75rem;
-  color: rgb(var(--color-warning));
-  margin: 0;
-}
-
-.notice i {
-  margin-top: 0.125rem;
-}
-
-/* Backdrop */
-.drawer-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgb(0 0 0 / 0.3);
-  z-index: 150;
-}
-
-@media (min-width: 769px) {
-  .drawer-backdrop {
-    display: none;
-  }
-}
-
-/* Transitions */
-.slideout-enter-active,
-.slideout-leave-active {
-  transition: transform 0.3s ease;
-}
-
-.slideout-enter-from,
-.slideout-leave-to {
-  transform: translateX(100%);
-}
-
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.3s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-
-/* Naive UI Overrides */
-:deep(.n-input-number) {
-  --n-color: var(--surface) !important;
-  --n-border: 1px solid var(--border) !important;
-  --n-text-color: var(--text-1) !important;
-  --n-color-focus: var(--surface) !important;
-  --n-border-focus: 1px solid rgb(var(--color-primary)) !important;
-}
-
-:deep(.n-switch) {
-  --n-rail-color: var(--border) !important;
-  --n-rail-color-active: rgb(var(--color-primary)) !important;
-}
-
-/* Scrollbar */
-.drawer-content::-webkit-scrollbar,
-.library-section::-webkit-scrollbar {
-  width: 6px;
-}
-
-.drawer-content::-webkit-scrollbar-track,
-.library-section::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.drawer-content::-webkit-scrollbar-thumb,
-.library-section::-webkit-scrollbar-thumb {
-  background: rgb(var(--color-dark) / 0.1);
+.xn-tile-badge {
+  width: 22px; height: 22px;
   border-radius: 3px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.6rem;
+}
+.xn-badge-xn { background: #107c10; color: #fff; }
+.xn-badge-ctrl { background: rgba(0,0,0,0.7); color: #ccc; border: 1px solid rgba(255,255,255,0.1); }
+
+/* List grid for apps without cover */
+.xn-list-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+.xn-list-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; border-radius: 8px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.07);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.xn-list-item:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.15); }
+.xn-list-item.selected { border-color: #107c10; background: rgba(16,124,16,0.1); }
+.xn-list-icon {
+  width: 40px; height: 40px; border-radius: 6px;
+  background: rgba(255,255,255,0.06);
+  display: flex; align-items: center; justify-content: center;
+  color: #888; font-size: 1rem; flex-shrink: 0;
+}
+.xn-list-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.xn-list-name { font-size: 0.9rem; font-weight: 600; color: #f0f0f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.xn-list-sub { font-size: 0.72rem; color: #666; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.xn-list-play {
+  width: 32px; height: 32px; border-radius: 50%;
+  background: #107c10; color: #fff; border: none;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.75rem; cursor: pointer; flex-shrink: 0;
+  opacity: 0; transition: opacity 0.15s;
+}
+.xn-list-item:hover .xn-list-play { opacity: 1; }
+
+/* Empty state */
+.xn-empty { display: flex; flex-direction: column; align-items: center; gap: 1rem; padding: 4rem 2rem; color: #555; text-align: center; }
+.xn-empty-icon { font-size: 2.5rem; }
+.xn-clear-btn { padding: 8px 20px; border-radius: 6px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); color: #ccc; cursor: pointer; }
+
+/* Resume banner */
+.xn-resume-bar {
+  display: flex; align-items: center; gap: 1rem;
+  padding: 14px 20px; border-radius: 8px;
+  background: rgba(16,124,16,0.15);
+  border: 1px solid rgba(16,124,16,0.3);
+  color: #ccc; font-size: 0.9rem;
+  margin-bottom: 1.5rem;
+}
+.xn-resume-bar i { color: #4ade80; }
+.xn-resume-btn {
+  margin-left: auto; padding: 7px 18px; border-radius: 5px;
+  background: #107c10; color: #fff; border: none;
+  font-weight: 700; cursor: pointer; font-size: 0.85rem;
 }
 
-.dark .drawer-content::-webkit-scrollbar-thumb,
-.dark .library-section::-webkit-scrollbar-thumb {
-  background: rgb(255 255 255 / 0.1);
+/* ═══════════════════════════════════════════════════════
+   SETTINGS PANEL
+═══════════════════════════════════════════════════════ */
+.xn-settings {
+  position: fixed; top: 56px; right: 0; bottom: 0;
+  width: 320px; z-index: 200;
+  background: #161616;
+  border-left: 1px solid rgba(255,255,255,0.08);
+  display: flex; flex-direction: column;
+  overflow-y: auto;
+}
+.xn-settings-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.xn-settings-header h3 { font-size: 1rem; font-weight: 700; color: #f0f0f0; margin: 0; }
+.xn-close-btn { background: transparent; border: none; color: #888; font-size: 1rem; cursor: pointer; padding: 4px; }
+.xn-close-btn:hover { color: #fff; }
+.xn-settings-body { padding: 1rem 1.5rem; display: flex; flex-direction: column; gap: 1.25rem; }
+.xn-setting-group { display: flex; flex-direction: column; gap: 0.5rem; }
+.xn-setting-row { flex-direction: row !important; align-items: center; justify-content: space-between; }
+.xn-setting-label { font-size: 0.8rem; font-weight: 600; color: #999; text-transform: uppercase; letter-spacing: 0.06em; }
+.xn-preset-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.xn-preset-btn {
+  padding: 6px 14px; border-radius: 5px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: #ccc; font-size: 0.82rem; cursor: pointer;
+  transition: all 0.15s;
+}
+.xn-preset-btn:hover { background: rgba(255,255,255,0.12); }
+.xn-preset-btn.active { background: #107c10; border-color: #107c10; color: #fff; font-weight: 700; }
+.xn-backdrop {
+  position: fixed; inset: 0; z-index: 190;
+  background: rgba(0,0,0,0.4);
 }
 
-/* XtremeNode — inline title row (replaces full header) */
-.xn-title {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 1rem;
-  font-weight: 700;
-  color: var(--text-primary);
-  white-space: nowrap;
-  margin: 0;
-}
-.xn-title .fas.fa-play {
-  color: var(--accent, #f59e0b);
-  font-size: 0.85rem;
-}
-.library-sub-row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-  margin-top: 0.5rem;
-}
-.library-sub-row h3 {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--text-secondary);
-  margin: 0;
-}
+/* Settings slide animation */
+.settings-slide-enter-active, .settings-slide-leave-active { transition: transform 0.25s ease; }
+.settings-slide-enter-from, .settings-slide-leave-to { transform: translateX(100%); }
 
+/* ═══════════════════════════════════════════════════════
+   STREAM OVERLAY
+═══════════════════════════════════════════════════════ */
+.xn-stream-overlay {
+  position: fixed; inset: 0; z-index: 500;
+  background: #000;
+  display: flex; align-items: center; justify-content: center;
+}
+.xn-starting-screen {
+  display: flex; flex-direction: column; align-items: center; gap: 1.5rem;
+  color: #ccc;
+}
+.xn-starting-logo { display: flex; align-items: center; gap: 0.5rem; font-size: 1.5rem; font-weight: 800; }
+.xn-starting-logo i { color: #107c10; }
+.xn-starting-logo span span { color: #107c10; }
+.xn-starting-spinner { font-size: 2rem; color: #107c10; }
+.xn-starting-label { font-size: 0.9rem; color: #777; }
+.xn-video-container { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.3s; }
+.xn-video-container.visible { opacity: 1; }
+.xn-video { width: 100%; height: 100%; object-fit: contain; display: block; }
+
+/* HUD */
+.xn-hud {
+  position: absolute; bottom: 0; left: 0; right: 0; z-index: 10;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 20px;
+  background: linear-gradient(to top, rgba(0,0,0,0.85), transparent);
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.3s;
+}
+.xn-hud.show { opacity: 1; pointer-events: all; }
+.xn-hud-left, .xn-hud-right, .xn-hud-stats { display: flex; align-items: center; gap: 1rem; }
+.xn-hud-app { font-size: 0.85rem; font-weight: 600; color: #ddd; }
+.xn-hud-stats span { font-size: 0.75rem; color: #aaa; background: rgba(255,255,255,0.08); padding: 2px 8px; border-radius: 4px; }
+.xn-hud-btn {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 16px; border-radius: 5px;
+  background: rgba(239,68,68,0.85); color: #fff;
+  border: none; font-size: 0.82rem; font-weight: 600;
+  cursor: pointer;
+}
+.xn-hud-btn:hover { background: rgba(239,68,68,1); }
+
+/* Notifications */
+.xn-notif {
+  position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 9999;
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 14px 16px; border-radius: 10px; max-width: 380px;
+  background: #1e1e1e; border: 1px solid rgba(255,255,255,0.1);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  color: #f0f0f0;
+}
+.xn-notif.error { border-color: rgba(239,68,68,0.4); background: rgba(30,10,10,0.95); }
+.xn-notif.error i { color: #f87171; }
+.xn-notif.success { border-color: rgba(74,222,128,0.4); }
+.xn-notif.success i { color: #4ade80; }
+.xn-notif.warning i { color: #fbbf24; }
+.xn-notif.info i { color: #60a5fa; }
+.xn-notif i:first-child { font-size: 1rem; margin-top: 2px; flex-shrink: 0; }
+.xn-notif-text { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.xn-notif-text strong { font-size: 0.85rem; }
+.xn-notif-text span { font-size: 0.78rem; color: #999; }
+.xn-notif-close { background: transparent; border: none; color: #666; cursor: pointer; font-size: 0.8rem; flex-shrink: 0; }
+.notif-fade-enter-active, .notif-fade-leave-active { transition: all 0.3s ease; }
+.notif-fade-enter-from, .notif-fade-leave-to { opacity: 0; transform: translateY(10px); }
 </style>

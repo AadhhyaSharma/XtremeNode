@@ -152,7 +152,7 @@ const defaultGroups = [
     id: 'network',
     name: 'Network',
     options: {
-      upnp: 'disabled',
+      upnp: 'enabled',
       address_family: 'ipv4',
       bind_address: '',
       port: 47989,

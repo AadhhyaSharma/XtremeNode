@@ -20,7 +20,7 @@ const routes = [
   { path: '/troubleshooting', component: TroubleshootingView },
   { path: '/changelog', redirect: '/' },
   { path: '/clients', component: ClientManagementView },
-  { path: '/webrtc', component: WebRtcClientView, meta: { container: 'full' } },
+  { path: '/webrtc', component: WebRtcClientView, meta: { container: 'full', noHeader: true, public: true } },
   { path: '/webrtc-embed', component: WebRtcEmbedView, meta: { container: 'full', noHeader: true } },
   { path: '/tunnel', component: TunnelView, meta: { container: 'lg' } },
 ];
@@ -73,7 +73,7 @@ router.beforeEach(async (_to: RouteLocationNormalized) => {
       }
     }
     // If not authenticated, trigger overlay (do not redirect)
-    if (!auth.isAuthenticated) auth.requireLogin();
+    if (!auth.isAuthenticated && !_to.meta?.public) auth.requireLogin();
   } catch {
     /* ignore */
   }

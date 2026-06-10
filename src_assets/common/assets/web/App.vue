@@ -83,10 +83,10 @@
                   class="absolute inset-0 bg-gradient-to-br from-white/70 via-white/60 to-white/70 dark:from-black/70 dark:via-black/60 dark:to-black/70 backdrop-blur-md"
                 ></div>
               </div>
-              <LoginModal />
+              <LoginModal v-if="!route.meta?.public" />
               <OfflineOverlay />
               <transition name="fade-fast">
-                <div v-if="loggedOut" class="fixed inset-0 z-[120] flex flex-col">
+                <div v-if="loggedOut && !route.meta?.public" class="fixed inset-0 z-[120] flex flex-col">
                   <div
                     class="absolute inset-0 bg-gradient-to-br from-white/70 via-white/60 to-white/70 dark:from-black/70 dark:via-black/60 dark:to-black/70 backdrop-blur-md"
                   ></div>
@@ -202,6 +202,7 @@ const loggedOut = ref(false);
 const authForOverlay = useAuthStore();
 const loginOverlay = computed(
   () =>
+    !route.meta?.public &&
     authForOverlay.ready &&
     authForOverlay.showLoginModal &&
     !authForOverlay.isAuthenticated &&

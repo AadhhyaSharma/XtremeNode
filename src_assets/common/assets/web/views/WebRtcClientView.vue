@@ -251,9 +251,40 @@
             <n-switch v-model:value="config.hdr" size="small" />
           </div>
 
+
           <div class="xn-setting-group xn-setting-row">
             <label class="xn-setting-label">Mute host audio</label>
             <n-switch v-model:value="config.muteHostAudio" size="small" />
+          </div>
+
+          <!-- GStreamer Low-Latency -->
+          <div class="xn-setting-group">
+            <div class="xn-setting-row" style="margin-bottom:6px">
+              <label class="xn-setting-label">GStreamer Low-Latency</label>
+              <n-switch v-model:value="gstEnabled" size="small" @update:value="onGstToggle" />
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <span
+                class="xn-gst-badge"
+                :class="gstInstalled ? 'installed' : gstInstalling ? 'installing' : 'missing'"
+              >
+                <i class="fas" :class="gstInstalled ? 'fa-check-circle' : gstInstalling ? 'fa-circle-notch fa-spin' : 'fa-exclamation-circle'"></i>
+                {{ gstInstalled ? 'GStreamer installed' : gstInstalling ? (gstInstallState === 'downloading' ? 'Downloading...' : 'Installing...') : 'Not installed' }}
+              </span>
+              <button
+                v-if="!gstInstalled && !gstInstalling"
+                class="xn-gst-install-btn"
+                @click="autoInstallGst"
+              >
+                <i class="fas fa-download"></i> Auto-Install
+              </button>
+            </div>
+            <p v-if="gstEnabled && !gstInstalled" style="font-size:.72rem;color:#f87171;margin-top:4px">
+              Install GStreamer on the host for low-latency encoding.
+            </p>
+            <p v-if="gstInstalled && gstEnabled" style="font-size:.72rem;color:#4ade80;margin-top:4px">
+              Enabled — using high-bitrate low-latency pipeline.
+            </p>
           </div>
 
         </div>
@@ -352,6 +383,45 @@ const message = useMessage();
 // UI State
 const showSettings = ref(false);
 const streamMinimized = ref(false);
+
+// ============================================
+// GSTREAMER
+// ============================================
+const gstEnabled      = ref(false);
+const gstInstalled    = ref(false);
+const gstInstalling   = ref(false);
+const gstInstallState = ref<string>('idle');
+
+async function checkGstStatus() {
+  try {
+    const r = await fetch('/api/gstreamer/status');
+    const d = await r.json();
+    gstInstalled.value    = d.installed === true;
+    gstInstallState.value = d.state || 'idle';
+    gstInstalling.value   = d.state === 'downloading' || d.state === 'installing';
+    if (gstInstalling.value) {
+      setTimeout(checkGstStatus, 4000);
+    }
+  } catch (_) {}
+}
+
+async function autoInstallGst() {
+  gstInstalling.value = true;
+  gstInstallState.value = 'downloading';
+  try {
+    await fetch('/api/gstreamer/install', { method: 'POST' });
+    setTimeout(checkGstStatus, 3000);
+  } catch (_) {
+    gstInstalling.value = false;
+  }
+}
+
+function onGstToggle(val: boolean) {
+  gstEnabled.value = val;
+}
+
+// Check on mount
+checkGstStatus();
 
 // ============================================
 // NOTIFICATION SYSTEM
@@ -3262,4 +3332,30 @@ watch(
 .xn-notif-close { background: transparent; border: none; color: #666; cursor: pointer; font-size: 0.8rem; flex-shrink: 0; }
 .notif-fade-enter-active, .notif-fade-leave-active { transition: all 0.3s ease; }
 .notif-fade-enter-from, .notif-fade-leave-to { opacity: 0; transform: translateY(10px); }
+
+/* ── GStreamer badge + install button ── */
+.xn-gst-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: .72rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 20px;
+}
+.xn-gst-badge.installed  { background: #0f2a0f; color: #4ade80; border: 1px solid #166534; }
+.xn-gst-badge.missing    { background: #2a0f0f; color: #f87171; border: 1px solid #991b1b; }
+.xn-gst-badge.installing { background: #1a1a0f; color: #fbbf24; border: 1px solid #854d0e; }
+.xn-gst-install-btn {
+  padding: 4px 12px;
+  background: #1e2a40;
+  color: #93c5fd;
+  border: 1px solid #2d3a50;
+  border-radius: 6px;
+  font-size: .72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s;
+}
+.xn-gst-install-btn:hover { background: #243450; }
 </style>
